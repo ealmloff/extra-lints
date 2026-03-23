@@ -1,0 +1,15 @@
+[package]
+name = "lints"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[workspace]
+exclude = ["no_interior_mutable_statics", "no_pub_fields_on_pub_structs"]
+
+[workspace.metadata.dylint]
+libraries = [
+    { path = "no_interior_mutable_statics" },
+    { path = "no_pub_fields_on_pub_structs" },
+]
