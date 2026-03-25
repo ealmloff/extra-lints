@@ -1,0 +1,96 @@
+warning: match on string with 2 literal arms suggests a missing enum
+  --> $DIR/main.rs:9:5
+   |
+LL | /     match s {
+LL | |         "start" => 1,
+LL | |         "stop" => 2,
+LL | |         _ => 0,
+LL | |     }
+   | |_____^
+   |
+   = note: consider defining an enum for these variants and parsing the string into it
+   = note: `#[warn(no_stringly_typed)]` on by default
+
+warning: match on string with 3 literal arms suggests a missing enum
+  --> $DIR/main.rs:18:5
+   |
+LL | /     match s.as_str() {
+LL | |         "create" => 1,
+LL | |         "update" => 2,
+LL | |         "delete" => 3,
+LL | |         _ => 0,
+LL | |     }
+   | |_____^
+   |
+   = note: consider defining an enum for these variants and parsing the string into it
+
+warning: if/else chain compares string to 2 literals, suggesting a missing enum
+  --> $DIR/main.rs:47:5
+   |
+LL | /     if s == "alpha" {
+LL | |         1
+LL | |     } else if s == "beta" {
+LL | |         2
+LL | |     } else {
+LL | |         0
+LL | |     }
+   | |_____^
+   |
+   = note: consider defining an enum and matching on it instead of string comparisons
+
+warning: if/else chain compares string to 3 literals, suggesting a missing enum
+  --> $DIR/main.rs:58:5
+   |
+LL | /     if cmd == "run" {
+LL | |         1
+LL | |     } else if cmd == "compile" {
+LL | |         2
+...  |
+LL | |         0
+LL | |     }
+   | |_____^
+   |
+   = note: consider defining an enum and matching on it instead of string comparisons
+
+warning: inserting string-literal key into HashMap suggests a struct or enum would be more appropriate
+  --> $DIR/main.rs:83:5
+   |
+LL |     config.insert("timeout", 30);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: consider using a struct with named fields or an enum-keyed map
+
+warning: inserting string-literal key into HashMap suggests a struct or enum would be more appropriate
+  --> $DIR/main.rs:84:5
+   |
+LL |     config.insert("retries", 3);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: consider using a struct with named fields or an enum-keyed map
+
+warning: inserting string-literal key into HashMap suggests a struct or enum would be more appropriate
+  --> $DIR/main.rs:90:5
+   |
+LL |     map.insert("name", 1);
+   |     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: consider using a struct with named fields or an enum-keyed map
+
+warning: inserting string-literal key into HashMap suggests a struct or enum would be more appropriate
+  --> $DIR/main.rs:91:5
+   |
+LL |     map.insert("role", 2);
+   |     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: consider using a struct with named fields or an enum-keyed map
+
+warning: inserting string-literal key into HashMap suggests a struct or enum would be more appropriate
+  --> $DIR/main.rs:92:5
+   |
+LL |     map.insert("dept", 3);
+   |     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: consider using a struct with named fields or an enum-keyed map
+
+warning: 9 warnings emitted
+

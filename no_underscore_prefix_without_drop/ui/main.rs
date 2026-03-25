@@ -77,6 +77,21 @@ trait MyTrait {
     fn no_body(&self, _x: i32);
 }
 
+// === Extern function args (should NOT warn — signature fixed by ABI) ===
+
+extern "C" fn extern_fn(_x: i32, _flag: bool) {}
+
+// === Trait impl method args (should NOT warn — forced by trait signature) ===
+
+struct Implementor;
+
+impl MyTrait for Implementor {
+    fn do_thing(&self, _val: u64) {}
+    fn with_buf(&self, _buf: Vec<u8>) {}
+    fn with_guard(&self, _guard: MutexGuard<'_, i32>) {}
+    fn no_body(&self, _x: i32) {}
+}
+
 fn main() {
     std::mem::drop(takes_async_int(1));
 }

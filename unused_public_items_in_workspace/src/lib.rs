@@ -4,17 +4,14 @@
 extern crate rustc_hir;
 extern crate rustc_span;
 
-use std::{
-    cell::RefCell,
-    collections::BTreeSet,
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::{cell::RefCell, collections::BTreeSet};
 
+use agent_lint_utils::workspace_lint::{CrateInfo, LintEnvConfig, Mode, write_artifact_file};
+use agent_lint_utils::{DefKey, def_key, normalized_def_path, span_location};
 use clippy_utils::diagnostics::span_lint_and_help;
 use rustc_hir::{Expr, ExprKind, ImplItem, ImplItemKind, Item, ItemKind, Node, QPath, TyKind};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_span::{FileName, Span, def_id::LOCAL_CRATE};
+use rustc_span::Span;
 use serde::{Deserialize, Serialize};
 
 dylint_linting::declare_late_lint! {
@@ -50,13 +47,12 @@ dylint_linting::declare_late_lint! {
     "public item is not referenced from any other workspace crate"
 }
 
+const ENV_CONFIG: LintEnvConfig = LintEnvConfig {
+    prefix: "UNUSED_PUBLIC_ITEMS",
+};
+
 thread_local! {
     static STATE: RefCell<LintState> = RefCell::new(LintState::default());
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-struct DefKey {
-    path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,13 +97,6 @@ struct AggregatedReport {
     unused: Vec<UnusedDef>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Mode {
-    Collect { artifact_dir: PathBuf },
-    Emit { unused: BTreeSet<DefKey> },
-    Disabled,
-}
-
 #[derive(Debug, Clone)]
 struct Candidate {
     def_key: DefKey,
@@ -118,11 +107,8 @@ struct Candidate {
 
 #[derive(Debug, Clone)]
 struct LintState {
-    mode: Mode,
-    crate_stable_id: String,
-    crate_name: String,
-    target_name: String,
-    target_kind: String,
+    mode: Mode<BTreeSet<DefKey>>,
+    info: CrateInfo,
     candidates: Vec<Candidate>,
     uses: BTreeSet<DefKey>,
 }
@@ -131,10 +117,7 @@ impl Default for LintState {
     fn default() -> Self {
         Self {
             mode: Mode::Disabled,
-            crate_stable_id: String::new(),
-            crate_name: String::new(),
-            target_name: String::new(),
-            target_kind: String::new(),
+            info: CrateInfo::default(),
             candidates: Vec::new(),
             uses: BTreeSet::new(),
         }
@@ -144,49 +127,17 @@ impl Default for LintState {
 impl LintState {
     fn for_crate<'tcx>(cx: &LateContext<'tcx>) -> Self {
         Self {
-            mode: Mode::from_env(),
-            crate_stable_id: stable_crate_id(cx, LOCAL_CRATE),
-            crate_name: cx.tcx.crate_name(LOCAL_CRATE).to_string(),
-            target_name: env::var("CARGO_CRATE_NAME").unwrap_or_else(|_| "unknown".to_owned()),
-            target_kind: env::var("CARGO_BIN_NAME")
-                .map(|_| "bin".to_owned())
-                .unwrap_or_else(|_| "lib".to_owned()),
+            mode: Mode::from_env(&ENV_CONFIG, |report: AggregatedReport| {
+                report.unused.into_iter().map(|entry| entry.def_key).collect()
+            }),
+            info: CrateInfo::for_current_crate(cx),
             candidates: Vec::new(),
             uses: BTreeSet::new(),
         }
     }
 
     fn enabled(&self) -> bool {
-        !matches!(self.mode, Mode::Disabled)
-    }
-}
-
-impl Mode {
-    fn from_env() -> Self {
-        match env::var("UNUSED_PUBLIC_ITEMS_MODE").as_deref() {
-            Ok("collect") => env::var_os("UNUSED_PUBLIC_ITEMS_DIR")
-                .map(PathBuf::from)
-                .map(|artifact_dir| Self::Collect { artifact_dir })
-                .unwrap_or(Self::Disabled),
-            Ok("emit") => {
-                let Some(report_path) = env::var_os("UNUSED_PUBLIC_ITEMS_REPORT") else {
-                    return Self::Disabled;
-                };
-                let Ok(bytes) = fs::read(report_path) else {
-                    return Self::Disabled;
-                };
-                let Ok(report) = serde_json::from_slice::<AggregatedReport>(&bytes) else {
-                    return Self::Disabled;
-                };
-                let unused = report
-                    .unused
-                    .into_iter()
-                    .map(|entry| entry.def_key)
-                    .collect();
-                Self::Emit { unused }
-            }
-            _ => Self::Disabled,
-        }
+        !self.mode.is_disabled()
     }
 }
 
@@ -267,13 +218,13 @@ impl<'tcx> LateLintPass<'tcx> for UnusedPublicItemsInWorkspace {
             let state = std::mem::take(&mut *state.borrow_mut());
             match state.mode {
                 Mode::Collect { ref artifact_dir } => {
-                    if let Err(error) = write_artifact(cx, &state, &artifact_dir) {
+                    if let Err(error) = write_artifact(cx, &state, artifact_dir) {
                         cx.tcx.sess.dcx().warn(format!(
                             "unused_public_items_in_workspace failed to write artifact: {error}"
                         ));
                     }
                 }
-                Mode::Emit { unused } => {
+                Mode::Emit { data: ref unused } => {
                     for candidate in &state.candidates {
                         if unused.contains(&candidate.def_key) {
                             span_lint_and_help(
@@ -385,7 +336,7 @@ fn record_use<'tcx>(
 fn write_artifact<'tcx>(
     cx: &LateContext<'tcx>,
     state: &LintState,
-    artifact_dir: &Path,
+    artifact_dir: &std::path::Path,
 ) -> Result<(), String> {
     let candidates = state
         .candidates
@@ -410,72 +361,18 @@ fn write_artifact<'tcx>(
         .collect::<Vec<_>>();
 
     let artifact = TargetArtifact {
-        crate_stable_id: state.crate_stable_id.clone(),
-        crate_name: state.crate_name.clone(),
-        target_name: state.target_name.clone(),
-        target_kind: state.target_kind.clone(),
+        crate_stable_id: state.info.crate_stable_id.clone(),
+        crate_name: state.info.crate_name.clone(),
+        target_name: state.info.target_name.clone(),
+        target_kind: state.info.target_kind.clone(),
         candidates,
         uses,
     };
 
-    let file_name = format!(
-        "{}-{}-{}.json",
-        sanitize(&artifact.crate_name),
-        sanitize(&artifact.target_name),
-        std::process::id(),
-    );
-    let final_path = artifact_dir.join(file_name);
-    let temp_path = final_path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(&artifact).map_err(|error| error.to_string())?;
-
-    fs::write(&temp_path, json).map_err(|error| error.to_string())?;
-    fs::rename(&temp_path, &final_path).map_err(|error| error.to_string())?;
-
-    Ok(())
-}
-
-fn stable_crate_id<'tcx>(
-    cx: &LateContext<'tcx>,
-    crate_num: rustc_span::def_id::CrateNum,
-) -> String {
-    format!("{:?}", cx.tcx.stable_crate_id(crate_num))
-}
-
-fn def_key<'tcx>(cx: &LateContext<'tcx>, def_id: rustc_span::def_id::DefId) -> DefKey {
-    DefKey {
-        path: normalized_def_path(cx, def_id),
-    }
-}
-
-fn normalized_def_path<'tcx>(cx: &LateContext<'tcx>, def_id: rustc_span::def_id::DefId) -> String {
-    let crate_name = cx.tcx.crate_name(def_id.krate).to_string();
-    let path = cx.tcx.def_path_str(def_id);
-    if path == crate_name || path.starts_with(&format!("{crate_name}::")) {
-        path
-    } else {
-        format!("{crate_name}::{path}")
-    }
-}
-
-fn span_location<'tcx>(cx: &LateContext<'tcx>, span: Span) -> Option<(String, u32, u32)> {
-    let source_map = cx.tcx.sess.source_map();
-    let location = source_map.lookup_char_pos(span.lo());
-    let FileName::Real(real_file) = &location.file.name else {
-        return None;
-    };
-    Some((
-        real_file.local_path()?.display().to_string(),
-        location.line.try_into().ok()?,
-        (location.col.0 + 1).try_into().ok()?,
-    ))
-}
-
-fn sanitize(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
-            _ => '_',
-        })
-        .collect()
+    write_artifact_file(
+        &artifact,
+        &state.info.crate_name,
+        &state.info.target_name,
+        artifact_dir,
+    )
 }

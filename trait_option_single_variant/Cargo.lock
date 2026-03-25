@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "agent_lint_utils"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -369,6 +377,7 @@ checksum = "d282ade6016312faf3e41e57ebbba0c073e4056dab1232ab1cb624199648f8ed"
 name = "trait_option_single_variant"
 version = "0.1.0"
 dependencies = [
+ "agent_lint_utils",
  "clippy_utils",
  "dylint_linting",
  "serde",

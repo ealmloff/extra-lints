@@ -1,12 +1,13 @@
 #![feature(rustc_private)]
 #![warn(unused_extern_crates)]
 
+extern crate rustc_abi;
 extern crate rustc_hir;
 extern crate rustc_middle;
 extern crate rustc_span;
 
 use clippy_utils::diagnostics::span_lint_and_note;
-use rustc_hir::{Item, ItemKind, VariantData};
+use rustc_hir::{Item, ItemKind, Node, VariantData};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::Ty;
 
@@ -79,6 +80,29 @@ impl<'tcx> LateLintPass<'tcx> for NoUnderscorePrefixWithoutDrop {
         // and should not be linted as a real function argument.
         if matches!(kind, rustc_hir::intravisit::FnKind::Closure) {
             return;
+        }
+
+        // Trait impl methods must accept the parameters the trait defines,
+        // so `_`-prefixing unused params is the only reasonable option.
+        if let rustc_hir::intravisit::FnKind::Method(_, _) = kind {
+            let parent_def_id = cx.tcx.hir_get_parent_item(cx.tcx.local_def_id_to_hir_id(_def_id)).def_id;
+            if let Node::Item(item) = cx.tcx.hir_node_by_def_id(parent_def_id) {
+                if let ItemKind::Impl(impl_) = item.kind {
+                    if impl_.of_trait.is_some() {
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Extern function signatures are fixed by an external ABI, so
+        // `_`-prefixing unused params is the only reasonable option.
+        if let Node::Item(item) = cx.tcx.hir_node_by_def_id(_def_id) {
+            if let ItemKind::Fn { sig, .. } = item.kind {
+                if sig.header.abi != rustc_abi::ExternAbi::Rust {
+                    return;
+                }
+            }
         }
 
         for param in body.params.iter() {

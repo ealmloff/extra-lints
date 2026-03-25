@@ -14,18 +14,25 @@ tempfile = "3.20"
 
 [workspace]
 exclude = [
+    "agent_lint_utils",
+    "item_complexity",
     "no_interior_mutable_statics",
     "no_pub_fields_on_pub_structs",
+    "no_stringly_typed",
     "no_underscore_prefix_without_drop",
     "trait_option_single_variant",
     "unused_public_items_in_workspace",
+    "derived_field_should_be_method",
 ]
 
 [workspace.metadata.dylint]
 libraries = [
+    { path = "item_complexity" },
     { path = "no_interior_mutable_statics" },
     { path = "no_pub_fields_on_pub_structs" },
+    { path = "no_stringly_typed" },
     { path = "no_underscore_prefix_without_drop" },
     { path = "trait_option_single_variant" },
     { path = "unused_public_items_in_workspace" },
+    { path = "derived_field_should_be_method" },
 ]
