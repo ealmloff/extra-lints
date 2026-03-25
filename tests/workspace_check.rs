@@ -73,7 +73,7 @@ fn main() {
     )
     .expect("crate_b source");
 
-    let status = Command::new(env!("CARGO_BIN_EXE_lints"))
+    let status = Command::new(env!("CARGO_BIN_EXE_pubprune"))
         .arg("check")
         .current_dir(workspace.path())
         .status()
