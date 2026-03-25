@@ -1,5 +1,5 @@
 warning: `_`-prefixed field `_count` has type `u32` which does not implement `Drop`
-  --> $DIR/main.rs:7:5
+  --> $DIR/main.rs:9:5
    |
 LL |     _count: u32,
    |     ^^^^^^^^^^^
@@ -8,7 +8,7 @@ LL |     _count: u32,
    = note: `#[warn(no_underscore_prefix_without_drop)]` on by default
 
 warning: `_`-prefixed field `_flag` has type `bool` which does not implement `Drop`
-  --> $DIR/main.rs:17:5
+  --> $DIR/main.rs:19:5
    |
 LL |     _flag: bool,
    |     ^^^^^^^^^^^
@@ -16,7 +16,7 @@ LL |     _flag: bool,
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the field
 
 warning: `_`-prefixed field `_data` has type `std::vec::Vec<u8>` which does not implement `Drop`
-  --> $DIR/main.rs:22:5
+  --> $DIR/main.rs:24:5
    |
 LL |     _data: Vec<u8>,
    |     ^^^^^^^^^^^^^^
@@ -24,7 +24,7 @@ LL |     _data: Vec<u8>,
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the field
 
 warning: `_`-prefixed binding `_x` has type `i32` which does not implement `Drop`
-  --> $DIR/main.rs:33:14
+  --> $DIR/main.rs:35:14
    |
 LL | fn takes_int(_x: i32) {}
    |              ^^
@@ -32,7 +32,7 @@ LL | fn takes_int(_x: i32) {}
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the binding
 
 warning: `_`-prefixed binding `_v` has type `std::vec::Vec<std::string::String>` which does not implement `Drop`
-  --> $DIR/main.rs:36:14
+  --> $DIR/main.rs:38:14
    |
 LL | fn takes_vec(_v: Vec<String>) {}
    |              ^^
@@ -40,7 +40,7 @@ LL | fn takes_vec(_v: Vec<String>) {}
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the binding
 
 warning: `_`-prefixed binding `_flag` has type `bool` which does not implement `Drop`
-  --> $DIR/main.rs:44:15
+  --> $DIR/main.rs:46:15
    |
 LL | fn takes_bool(_flag: bool) {}
    |               ^^^^^
@@ -48,15 +48,23 @@ LL | fn takes_bool(_flag: bool) {}
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the binding
 
 warning: `_`-prefixed binding `_s` has type `std::string::String` which does not implement `Drop`
-  --> $DIR/main.rs:50:17
+  --> $DIR/main.rs:52:17
    |
 LL | fn takes_string(_s: String) {}
    |                 ^^
    |
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the binding
 
+warning: `_`-prefixed binding `_x` has type `i32` which does not implement `Drop`
+  --> $DIR/main.rs:56:26
+   |
+LL | async fn takes_async_int(_x: i32) {}
+   |                          ^^
+   |
+   = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the binding
+
 warning: `_`-prefixed binding `_val` has type `u64` which does not implement `Drop`
-  --> $DIR/main.rs:56:24
+  --> $DIR/main.rs:62:24
    |
 LL |     fn do_thing(&self, _val: u64) {
    |                        ^^^^
@@ -64,12 +72,12 @@ LL |     fn do_thing(&self, _val: u64) {
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the binding
 
 warning: `_`-prefixed binding `_buf` has type `std::vec::Vec<u8>` which does not implement `Drop`
-  --> $DIR/main.rs:61:24
+  --> $DIR/main.rs:67:24
    |
 LL |     fn with_buf(&self, _buf: Vec<u8>) {
    |                        ^^^^
    |
    = note: the `_` prefix is conventionally used to keep a value alive for its destructor; consider removing the prefix or the binding
 
-warning: 9 warnings emitted
+warning: 10 warnings emitted
 

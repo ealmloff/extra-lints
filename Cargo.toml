@@ -17,6 +17,7 @@ exclude = [
     "no_interior_mutable_statics",
     "no_pub_fields_on_pub_structs",
     "no_underscore_prefix_without_drop",
+    "trait_option_single_variant",
     "unused_public_items_in_workspace",
 ]
 
@@ -25,5 +26,6 @@ libraries = [
     { path = "no_interior_mutable_statics" },
     { path = "no_pub_fields_on_pub_structs" },
     { path = "no_underscore_prefix_without_drop" },
+    { path = "trait_option_single_variant" },
     { path = "unused_public_items_in_workspace" },
 ]

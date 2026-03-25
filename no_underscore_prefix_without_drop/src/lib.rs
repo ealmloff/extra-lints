@@ -68,12 +68,19 @@ impl<'tcx> LateLintPass<'tcx> for NoUnderscorePrefixWithoutDrop {
     fn check_fn(
         &mut self,
         cx: &LateContext<'tcx>,
-        _kind: rustc_hir::intravisit::FnKind<'tcx>,
+        kind: rustc_hir::intravisit::FnKind<'tcx>,
         _decl: &'tcx rustc_hir::FnDecl<'tcx>,
         body: &'tcx rustc_hir::Body<'tcx>,
         _span: rustc_span::Span,
         _def_id: rustc_hir::def_id::LocalDefId,
     ) {
+        // Async lowering introduces an internal closure with a hidden
+        // `_task_context: ResumeTy` parameter. That binding is not user-written
+        // and should not be linted as a real function argument.
+        if matches!(kind, rustc_hir::intravisit::FnKind::Closure) {
+            return;
+        }
+
         for param in body.params.iter() {
             // Only look at simple identifier patterns
             if let rustc_hir::PatKind::Binding(_, hir_id, ident, _) = param.pat.kind {

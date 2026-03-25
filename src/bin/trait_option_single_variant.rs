@@ -15,19 +15,39 @@ struct DefKey {
     path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+enum CandidateKey {
+    TraitMethodParam { trait_item: DefKey, index: usize },
+    TraitConst { trait_item: DefKey },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+enum OptionVariant {
+    Some,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+enum ObservedValue {
+    Some,
+    None,
+    Other,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CandidateRecord {
-    def_key: DefKey,
-    kind: String,
+    key: CandidateKey,
     display_path: String,
+    description: String,
     file: String,
     line: u32,
     column: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct UseRecord {
-    def_key: DefKey,
+struct ObservationRecord {
+    key: CandidateKey,
+    value: ObservedValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,16 +57,15 @@ struct TargetArtifact {
     target_name: String,
     target_kind: String,
     candidates: Vec<CandidateRecord>,
-    uses: Vec<UseRecord>,
+    observations: Vec<ObservationRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct UnusedDef {
-    def_key: DefKey,
-    crate_name: String,
-    target_name: String,
-    kind: String,
+struct ReportEntry {
+    key: CandidateKey,
     display_path: String,
+    description: String,
+    variant: OptionVariant,
     file: String,
     line: u32,
     column: u32,
@@ -54,7 +73,7 @@ struct UnusedDef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AggregatedReport {
-    unused: Vec<UnusedDef>,
+    redundant: Vec<ReportEntry>,
 }
 
 fn main() -> ExitCode {
@@ -107,12 +126,11 @@ fn run() -> Result<()> {
     let workspace_root = PathBuf::from(&metadata.workspace_root);
     let workspace_manifest_path = workspace_root.join("Cargo.toml");
     let target_dir = PathBuf::from(&metadata.target_directory);
-    let artifact_dir = target_dir.join("unused_public_items");
-    let collect_target_dir = target_dir.join("unused_public_items_collect");
-    let emit_target_dir = target_dir.join("unused_public_items_emit");
+    let artifact_dir = target_dir.join("trait_option_single_variant");
+    let collect_target_dir = target_dir.join("trait_option_single_variant_collect");
+    let emit_target_dir = target_dir.join("trait_option_single_variant_emit");
     let report_path = artifact_dir.join("report.json");
-    let lint_crate_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("unused_public_items_in_workspace");
+    let lint_crate_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("trait_option_single_variant");
     let lint_library_path = build_lint_library(&lint_crate_path)?;
 
     if artifact_dir.exists() {
@@ -201,11 +219,11 @@ fn run_dylint(
         .arg("--all-targets")
         .env("CARGO_TARGET_DIR", cargo_target_dir)
         .env("RUSTC_WRAPPER", "")
-        .env("UNUSED_PUBLIC_ITEMS_MODE", mode)
-        .env("UNUSED_PUBLIC_ITEMS_DIR", artifact_dir);
+        .env("TRAIT_OPTION_SINGLE_VARIANT_MODE", mode)
+        .env("TRAIT_OPTION_SINGLE_VARIANT_DIR", artifact_dir);
 
     if let Some(report_path) = report_path {
-        command.env("UNUSED_PUBLIC_ITEMS_REPORT", report_path);
+        command.env("TRAIT_OPTION_SINGLE_VARIANT_REPORT", report_path);
     }
 
     let status = command.status().context("failed to launch cargo dylint")?;
@@ -237,7 +255,7 @@ fn build_lint_library(lint_crate_path: &Path) -> Result<PathBuf> {
     }
 
     let built_library_path = lint_crate_path.join("target").join("release").join(format!(
-        "{}unused_public_items_in_workspace.{}",
+        "{}trait_option_single_variant.{}",
         dylib_prefix(),
         dylib_extension(),
     ));
@@ -250,7 +268,7 @@ fn build_lint_library(lint_crate_path: &Path) -> Result<PathBuf> {
     }
 
     let dylint_library_path = lint_crate_path.join("target").join("release").join(format!(
-        "{}unused_public_items_in_workspace@{}.{}",
+        "{}trait_option_single_variant@{}.{}",
         dylib_prefix(),
         dylint_toolchain_name(),
         dylib_extension(),
@@ -354,38 +372,47 @@ fn aggregate_artifacts(artifact_dir: &Path) -> Result<AggregatedReport> {
         );
     }
 
-    let used = artifacts
-        .iter()
-        .flat_map(|artifact| artifact.uses.iter())
-        .map(|use_record| use_record.def_key.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-
-    let mut candidates = std::collections::BTreeMap::<DefKey, UnusedDef>::new();
+    let mut candidates = std::collections::BTreeMap::<CandidateKey, CandidateRecord>::new();
+    let mut observations =
+        std::collections::BTreeMap::<CandidateKey, std::collections::BTreeSet<ObservedValue>>::new(
+        );
 
     for artifact in artifacts {
         for candidate in artifact.candidates {
-            candidates
-                .entry(candidate.def_key.clone())
-                .or_insert(UnusedDef {
-                    def_key: candidate.def_key,
-                    crate_name: artifact.crate_name.clone(),
-                    target_name: artifact.target_name.clone(),
-                    kind: candidate.kind,
-                    display_path: candidate.display_path,
-                    file: candidate.file,
-                    line: candidate.line,
-                    column: candidate.column,
-                });
+            candidates.entry(candidate.key.clone()).or_insert(candidate);
+        }
+
+        for observation in artifact.observations {
+            observations
+                .entry(observation.key.clone())
+                .or_default()
+                .insert(observation.value);
         }
     }
 
-    let mut unused = candidates
+    let mut redundant = candidates
         .into_iter()
-        .filter(|(def_key, _)| !used.contains(def_key))
-        .map(|(_, candidate)| candidate)
+        .filter_map(|(key, candidate)| {
+            let values = observations.get(&key)?;
+            let variant = match values.iter().copied().collect::<Vec<_>>().as_slice() {
+                [ObservedValue::Some] => Some(OptionVariant::Some),
+                [ObservedValue::None] => Some(OptionVariant::None),
+                _ => None,
+            }?;
+
+            Some(ReportEntry {
+                key,
+                display_path: candidate.display_path,
+                description: candidate.description,
+                variant,
+                file: candidate.file,
+                line: candidate.line,
+                column: candidate.column,
+            })
+        })
         .collect::<Vec<_>>();
 
-    unused.sort_by(|left, right| {
+    redundant.sort_by(|left, right| {
         left.file
             .cmp(&right.file)
             .then(left.line.cmp(&right.line))
@@ -393,5 +420,5 @@ fn aggregate_artifacts(artifact_dir: &Path) -> Result<AggregatedReport> {
             .then(left.display_path.cmp(&right.display_path))
     });
 
-    Ok(AggregatedReport { unused })
+    Ok(AggregatedReport { redundant })
 }

@@ -1,3 +1,5 @@
+// edition:2024
+
 use std::sync::MutexGuard;
 
 // === Struct fields ===
@@ -49,6 +51,10 @@ fn wildcard(_: i32) {}
 // Should warn: _s is String — Drop is just dealloc
 fn takes_string(_s: String) {}
 
+// Should warn once for the explicit _x parameter, but should NOT warn on the
+// compiler-generated async plumbing parameter.
+async fn takes_async_int(_x: i32) {}
+
 // === Trait method args ===
 
 trait MyTrait {
@@ -71,4 +77,6 @@ trait MyTrait {
     fn no_body(&self, _x: i32);
 }
 
-fn main() {}
+fn main() {
+    std::mem::drop(takes_async_int(1));
+}

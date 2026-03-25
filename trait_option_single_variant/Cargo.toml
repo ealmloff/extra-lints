@@ -1,0 +1,19 @@
+[package]
+name = "trait_option_single_variant"
+version = "0.1.0"
+authors = ["authors go here"]
+description = "workspace-wide trait Option single-variant lint"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "20ce69b9a63bcd2756cd906fe0964d1e901e042a" }
+dylint_linting = "5.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[package.metadata.rust-analyzer]
+rustc_private = true
