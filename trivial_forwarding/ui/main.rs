@@ -118,6 +118,48 @@ impl Outer {
     fn get_doubled(&self) -> i32 {
         self.inner.get() * 2
     }
+
+    // SHOULD NOT WARN: `builder` methods are exempt
+    fn builder(&self) -> i32 {
+        self.inner.get()
+    }
+
+    // SHOULD NOT WARN: `new` methods are exempt
+    fn new(&self) -> i32 {
+        self.inner.get()
+    }
+}
+
+struct MultiOuter {
+    inner: Inner,
+    label: &'static str,
+}
+
+impl MultiOuter {
+    // SHOULD NOT WARN: multi-field wrappers may intentionally delegate to one field
+    fn get(&self) -> i32 {
+        self.inner.get()
+    }
+
+    // SHOULD NOT WARN: multi-field wrappers may forward through a helper function
+    fn add_via_helper(&self, x: i32) -> i32 {
+        multi_outer_add_via_helper(self, x)
+    }
+}
+
+fn multi_outer_add_via_helper(this: &MultiOuter, x: i32) -> i32 {
+    this.inner.add(x) + this.label.len() as i32
+}
+
+trait ReadValue {
+    fn read(&self) -> i32;
+}
+
+impl ReadValue for Outer {
+    // SHOULD NOT WARN: trait impls may need a forwarding body
+    fn read(&self) -> i32 {
+        self.inner.get()
+    }
 }
 
 // === Unsafe edge case ===

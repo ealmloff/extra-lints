@@ -86,14 +86,15 @@ pub struct Config {
         .current_dir(workspace.path())
         .output()
         .expect("run coordinator");
-    assert!(output.status.success(), "status: {:#?}\nstderr: {}", output.status, String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "status: {:#?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    let report = fs::read_to_string(
-        workspace
-            .path()
-            .join("target/osf/report.json"),
-    )
-    .expect("read report");
+    let report =
+        fs::read_to_string(workspace.path().join("target/osf/report.json")).expect("read report");
 
     // User, Admin, and Profile all share 3 fields (name: String, email: String, age: u32)
     // so all three should appear in the report

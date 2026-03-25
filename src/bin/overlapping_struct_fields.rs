@@ -116,8 +116,7 @@ fn run() -> Result<()> {
     let collect_target_dir = target_dir.join("osf_collect");
     let emit_target_dir = target_dir.join("osf_emit");
     let report_path = artifact_dir.join("report.json");
-    let lint_crate_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("overlapping_struct_fields");
+    let lint_crate_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("overlapping_struct_fields");
     let lint_library_path = build_lint_library(&lint_crate_path)?;
 
     if artifact_dir.exists() {

@@ -121,15 +121,6 @@ fn run() -> Result<()> {
     }
     fs::create_dir_all(&artifact_dir)
         .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
-    if collect_target_dir.exists() {
-        fs::remove_dir_all(&collect_target_dir)
-            .with_context(|| format!("failed to clear {}", collect_target_dir.display()))?;
-    }
-    if emit_target_dir.exists() {
-        fs::remove_dir_all(&emit_target_dir)
-            .with_context(|| format!("failed to clear {}", emit_target_dir.display()))?;
-    }
-
     run_dylint(
         &workspace_root,
         &workspace_manifest_path,

@@ -389,8 +389,7 @@ fn aggregate_artifacts(artifact_dir: &Path) -> Result<AggregatedReport> {
     }
 
     let mut candidates = std::collections::BTreeMap::<FieldKey, CandidateRecord>::new();
-    let mut observations =
-        std::collections::BTreeMap::<FieldKey, Vec<NormalizedExpr>>::new();
+    let mut observations = std::collections::BTreeMap::<FieldKey, Vec<NormalizedExpr>>::new();
 
     for artifact in artifacts {
         for candidate in artifact.candidates {
@@ -469,8 +468,7 @@ fn references_other_sibling(expr: &NormalizedExpr, self_field: &str) -> bool {
     match expr {
         NormalizedExpr::SiblingField(name) => name != self_field,
         NormalizedExpr::BinOp(_, l, r) => {
-            references_other_sibling(l, self_field)
-                || references_other_sibling(r, self_field)
+            references_other_sibling(l, self_field) || references_other_sibling(r, self_field)
         }
         NormalizedExpr::UnaryOp(_, inner) => references_other_sibling(inner, self_field),
         NormalizedExpr::MethodCall(_, args)

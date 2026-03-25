@@ -8,7 +8,10 @@ extern crate rustc_span;
 use clippy_utils::diagnostics::span_lint_and_help;
 use rustc_hir::def::Res;
 use rustc_hir::intravisit::FnKind;
-use rustc_hir::{Body, Expr, ExprKind, Item, ItemKind, PatKind, QPath, UseKind};
+use rustc_hir::{
+    Body, Expr, ExprKind, Item, ItemKind, Node, PatKind, QPath, TyKind, UseKind, VariantData,
+    def_id::LocalDefId,
+};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::Visibility;
 use rustc_span::Span;
@@ -68,9 +71,9 @@ impl<'tcx> LateLintPass<'tcx> for TrivialForwarding {
         _decl: &'tcx rustc_hir::FnDecl<'tcx>,
         body: &'tcx Body<'tcx>,
         span: Span,
-        _def_id: rustc_hir::def_id::LocalDefId,
+        def_id: LocalDefId,
     ) {
-        check_trivial_forwarding_fn(cx, kind, body, span);
+        check_trivial_forwarding_fn(cx, kind, body, span, def_id);
     }
 }
 
@@ -123,12 +126,23 @@ fn check_trivial_forwarding_fn<'tcx>(
     kind: FnKind<'tcx>,
     body: &'tcx Body<'tcx>,
     span: Span,
+    def_id: LocalDefId,
 ) {
     // Only named functions/methods.
     if matches!(kind, FnKind::Closure) {
         return;
     }
     if span.from_expansion() {
+        return;
+    }
+
+    if is_allowed_wrapper_method(&kind) {
+        return;
+    }
+
+    // Trait impl bodies often must exist to satisfy the trait surface, so a
+    // pure forwarder there is not necessarily redundant.
+    if is_trait_impl_fn(cx, def_id) {
         return;
     }
 
@@ -199,6 +213,10 @@ fn check_trivial_forwarding_fn<'tcx>(
         _ => return,
     }
 
+    if is_multifield_struct_method(cx, &kind, def_id) {
+        return;
+    }
+
     let name = fn_kind_name(&kind);
     span_lint_and_help(
         cx,
@@ -208,6 +226,65 @@ fn check_trivial_forwarding_fn<'tcx>(
         None,
         "consider removing this wrapper and calling the target directly, or using a re-export",
     );
+}
+
+fn is_trait_impl_fn<'tcx>(cx: &LateContext<'tcx>, def_id: LocalDefId) -> bool {
+    let parent_def_id = cx
+        .tcx
+        .hir_get_parent_item(cx.tcx.local_def_id_to_hir_id(def_id))
+        .def_id;
+    let Node::Item(item) = cx.tcx.hir_node_by_def_id(parent_def_id) else {
+        return false;
+    };
+    let ItemKind::Impl(impl_) = item.kind else {
+        return false;
+    };
+
+    impl_.of_trait.is_some()
+}
+
+fn is_allowed_wrapper_method(kind: &FnKind<'_>) -> bool {
+    matches!(kind, FnKind::Method(ident, _) if matches!(ident.as_str(), "builder" | "new"))
+}
+
+fn is_multifield_struct_method<'tcx>(
+    cx: &LateContext<'tcx>,
+    kind: &FnKind<'tcx>,
+    def_id: LocalDefId,
+) -> bool {
+    if !matches!(kind, FnKind::Method(..)) {
+        return false;
+    }
+
+    enclosing_struct_field_count(cx, def_id).is_some_and(|field_count| field_count > 1)
+}
+
+fn enclosing_struct_field_count<'tcx>(cx: &LateContext<'tcx>, def_id: LocalDefId) -> Option<usize> {
+    let parent_def_id = cx
+        .tcx
+        .hir_get_parent_item(cx.tcx.local_def_id_to_hir_id(def_id))
+        .def_id;
+    let Node::Item(item) = cx.tcx.hir_node_by_def_id(parent_def_id) else {
+        return None;
+    };
+    let ItemKind::Impl(impl_) = item.kind else {
+        return None;
+    };
+    let TyKind::Path(QPath::Resolved(_, path)) = impl_.self_ty.kind else {
+        return None;
+    };
+    let Some(self_def_id) = path.res.opt_def_id()?.as_local() else {
+        return None;
+    };
+    let Node::Item(item) = cx.tcx.hir_node_by_def_id(self_def_id) else {
+        return None;
+    };
+
+    match item.kind {
+        ItemKind::Struct(_, _, VariantData::Struct { fields, .. }) => Some(fields.len()),
+        ItemKind::Struct(_, _, VariantData::Tuple(fields, ..)) => Some(fields.len()),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
