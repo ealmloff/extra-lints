@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     env,
     ffi::OsString,
     fs,
@@ -7,7 +8,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use cargo_metadata::MetadataCommand;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -20,41 +20,19 @@ struct DefKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-struct FieldKey {
-    struct_def: DefKey,
-    field_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-enum NormalizedExpr {
-    SiblingField(String),
-    LitInt(i128),
-    LitFloat(String),
-    LitBool(bool),
-    LitStr(String),
-    LitChar(char),
-    BinOp(String, Box<NormalizedExpr>, Box<NormalizedExpr>),
-    UnaryOp(String, Box<NormalizedExpr>),
-    MethodCall(String, Vec<NormalizedExpr>),
-    FnCall(String, Vec<NormalizedExpr>),
-    FieldAccess(Box<NormalizedExpr>, String),
-    Tuple(Vec<NormalizedExpr>),
-    Opaque,
+struct StructField {
+    name: String,
+    ty: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CandidateRecord {
-    key: FieldKey,
+struct StructRecord {
+    def_key: DefKey,
     display_path: String,
+    fields: Vec<StructField>,
     file: String,
     line: u32,
     column: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ObservationRecord {
-    key: FieldKey,
-    expr: NormalizedExpr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,24 +41,21 @@ struct TargetArtifact {
     crate_name: String,
     target_name: String,
     target_kind: String,
-    candidates: Vec<CandidateRecord>,
-    observations: Vec<ObservationRecord>,
+    structs: Vec<StructRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReportEntry {
-    key: FieldKey,
-    display_path: String,
-    expr: NormalizedExpr,
-    construction_site_count: usize,
-    file: String,
-    line: u32,
-    column: u32,
+struct OverlapEntry {
+    struct_a: DefKey,
+    struct_b: DefKey,
+    display_path_a: String,
+    display_path_b: String,
+    shared_fields: Vec<StructField>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AggregatedReport {
-    redundant_fields: Vec<ReportEntry>,
+    overlaps: Vec<OverlapEntry>,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +99,7 @@ fn run() -> Result<()> {
             .context("workspace hint path must have a parent directory")?
     };
 
-    let metadata = MetadataCommand::new()
+    let metadata = cargo_metadata::MetadataCommand::new()
         .current_dir(&metadata_dir)
         .exec()
         .with_context(|| {
@@ -137,12 +112,12 @@ fn run() -> Result<()> {
     let workspace_root = PathBuf::from(&metadata.workspace_root);
     let workspace_manifest_path = workspace_root.join("Cargo.toml");
     let target_dir = PathBuf::from(&metadata.target_directory);
-    let artifact_dir = target_dir.join("dfsm");
-    let collect_target_dir = target_dir.join("dfsm_collect");
-    let emit_target_dir = target_dir.join("dfsm_emit");
+    let artifact_dir = target_dir.join("osf");
+    let collect_target_dir = target_dir.join("osf_collect");
+    let emit_target_dir = target_dir.join("osf_emit");
     let report_path = artifact_dir.join("report.json");
     let lint_crate_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("derived_field_should_be_method");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("overlapping_struct_fields");
     let lint_library_path = build_lint_library(&lint_crate_path)?;
 
     if artifact_dir.exists() {
@@ -223,11 +198,11 @@ fn run_dylint(
         .arg("--all-targets")
         .env("CARGO_TARGET_DIR", cargo_target_dir)
         .env("RUSTC_WRAPPER", "")
-        .env("DERIVED_FIELD_SHOULD_BE_METHOD_MODE", mode)
-        .env("DERIVED_FIELD_SHOULD_BE_METHOD_DIR", artifact_dir);
+        .env("OVERLAPPING_STRUCT_FIELDS_MODE", mode)
+        .env("OVERLAPPING_STRUCT_FIELDS_DIR", artifact_dir);
 
     if let Some(report_path) = report_path {
-        command.env("DERIVED_FIELD_SHOULD_BE_METHOD_REPORT", report_path);
+        command.env("OVERLAPPING_STRUCT_FIELDS_REPORT", report_path);
     }
 
     let status = command.status().context("failed to launch cargo dylint")?;
@@ -259,7 +234,7 @@ fn build_lint_library(lint_crate_path: &Path) -> Result<PathBuf> {
     }
 
     let built_library_path = lint_crate_path.join("target").join("release").join(format!(
-        "{}derived_field_should_be_method.{}",
+        "{}overlapping_struct_fields.{}",
         dylib_prefix(),
         dylib_extension(),
     ));
@@ -272,7 +247,7 @@ fn build_lint_library(lint_crate_path: &Path) -> Result<PathBuf> {
     }
 
     let dylint_library_path = lint_crate_path.join("target").join("release").join(format!(
-        "{}derived_field_should_be_method@{}.{}",
+        "{}overlapping_struct_fields@{}.{}",
         dylib_prefix(),
         dylint_toolchain_name(),
         dylib_extension(),
@@ -358,6 +333,8 @@ fn dylint_toolchain_name() -> &'static str {
 // Aggregation
 // ---------------------------------------------------------------------------
 
+const OVERLAP_THRESHOLD: usize = 3;
+
 fn aggregate_artifacts(artifact_dir: &Path) -> Result<AggregatedReport> {
     let mut artifacts = Vec::new();
 
@@ -384,101 +361,58 @@ fn aggregate_artifacts(artifact_dir: &Path) -> Result<AggregatedReport> {
 
     if artifacts.is_empty() {
         return Ok(AggregatedReport {
-            redundant_fields: Vec::new(),
+            overlaps: Vec::new(),
         });
     }
 
-    let mut candidates = std::collections::BTreeMap::<FieldKey, CandidateRecord>::new();
-    let mut observations =
-        std::collections::BTreeMap::<FieldKey, Vec<NormalizedExpr>>::new();
-
+    // Collect all structs, dedup by DefKey.
+    let mut all_structs = BTreeMap::<DefKey, StructRecord>::new();
     for artifact in artifacts {
-        for candidate in artifact.candidates {
-            candidates.entry(candidate.key.clone()).or_insert(candidate);
-        }
-
-        for observation in artifact.observations {
-            observations
-                .entry(observation.key.clone())
-                .or_default()
-                .push(observation.expr);
+        for record in artifact.structs {
+            all_structs.entry(record.def_key.clone()).or_insert(record);
         }
     }
 
-    let mut redundant_fields = candidates
-        .into_iter()
-        .filter_map(|(key, candidate)| {
-            let exprs = observations.get(&key)?;
+    let structs: Vec<&StructRecord> = all_structs.values().collect();
+    let mut overlaps = Vec::new();
 
-            // Need at least 2 construction sites.
-            if exprs.len() < 2 {
-                return None;
+    // Pairwise comparison.
+    for i in 0..structs.len() {
+        let field_set_a: BTreeSet<&StructField> = structs[i].fields.iter().collect();
+
+        for j in (i + 1)..structs.len() {
+            let shared: Vec<StructField> = structs[j]
+                .fields
+                .iter()
+                .filter(|f| field_set_a.contains(f))
+                .cloned()
+                .collect();
+
+            if shared.len() >= OVERLAP_THRESHOLD {
+                // Emit two entries: one for struct_a, one for struct_b, so both get flagged.
+                overlaps.push(OverlapEntry {
+                    struct_a: structs[i].def_key.clone(),
+                    struct_b: structs[j].def_key.clone(),
+                    display_path_a: structs[i].display_path.clone(),
+                    display_path_b: structs[j].display_path.clone(),
+                    shared_fields: shared.clone(),
+                });
+                overlaps.push(OverlapEntry {
+                    struct_a: structs[j].def_key.clone(),
+                    struct_b: structs[i].def_key.clone(),
+                    display_path_a: structs[j].display_path.clone(),
+                    display_path_b: structs[i].display_path.clone(),
+                    shared_fields: shared,
+                });
             }
+        }
+    }
 
-            // Skip if any observation is Opaque.
-            if exprs.iter().any(|e| *e == NormalizedExpr::Opaque) {
-                return None;
-            }
-
-            // Check all observations are identical.
-            let first = &exprs[0];
-            if !exprs.iter().all(|e| e == first) {
-                return None;
-            }
-
-            // Skip fields whose expression is just SiblingField(self) — that's
-            // field shorthand (`Foo { key }`) and not an actual derivation.
-            // Also skip expressions that only reference themselves and constants
-            // (no reference to any *other* sibling field) since those aren't
-            // truly "derived from other fields".
-            if is_only_self_or_constant(first, &key.field_name) {
-                return None;
-            }
-
-            Some(ReportEntry {
-                key,
-                display_path: candidate.display_path,
-                expr: first.clone(),
-                construction_site_count: exprs.len(),
-                file: candidate.file,
-                line: candidate.line,
-                column: candidate.column,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    redundant_fields.sort_by(|left, right| {
-        left.file
-            .cmp(&right.file)
-            .then(left.line.cmp(&right.line))
-            .then(left.column.cmp(&right.column))
-            .then(left.display_path.cmp(&right.display_path))
+    overlaps.sort_by(|a, b| {
+        a.display_path_a
+            .cmp(&b.display_path_a)
+            .then(a.display_path_b.cmp(&b.display_path_b))
     });
 
-    Ok(AggregatedReport { redundant_fields })
-}
-
-/// Returns `true` if the expression contains no `SiblingField` references to
-/// fields other than `self_field`. This catches field shorthand (`Foo { key }`)
-/// and expressions that only involve the field's own value plus constants.
-fn is_only_self_or_constant(expr: &NormalizedExpr, self_field: &str) -> bool {
-    !references_other_sibling(expr, self_field)
-}
-
-fn references_other_sibling(expr: &NormalizedExpr, self_field: &str) -> bool {
-    match expr {
-        NormalizedExpr::SiblingField(name) => name != self_field,
-        NormalizedExpr::BinOp(_, l, r) => {
-            references_other_sibling(l, self_field)
-                || references_other_sibling(r, self_field)
-        }
-        NormalizedExpr::UnaryOp(_, inner) => references_other_sibling(inner, self_field),
-        NormalizedExpr::MethodCall(_, args)
-        | NormalizedExpr::FnCall(_, args)
-        | NormalizedExpr::Tuple(args) => {
-            args.iter().any(|a| references_other_sibling(a, self_field))
-        }
-        NormalizedExpr::FieldAccess(base, _) => references_other_sibling(base, self_field),
-        _ => false,
-    }
+    Ok(AggregatedReport { overlaps })
 }

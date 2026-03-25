@@ -1,0 +1,20 @@
+[package]
+name = "overlapping_struct_fields"
+version = "0.1.0"
+authors = ["authors go here"]
+description = "workspace-wide lint detecting structs with overlapping field sets"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+agent_lint_utils = { path = "../agent_lint_utils" }
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "20ce69b9a63bcd2756cd906fe0964d1e901e042a" }
+dylint_linting = "5.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[package.metadata.rust-analyzer]
+rustc_private = true

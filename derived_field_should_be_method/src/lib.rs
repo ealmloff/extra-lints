@@ -506,7 +506,8 @@ fn peel_blocks<'tcx>(mut expr: &'tcx Expr<'tcx>) -> &'tcx Expr<'tcx> {
 // ---------------------------------------------------------------------------
 
 fn emit_lint<'tcx>(cx: &LateContext<'tcx>, candidate: &Candidate, entry: &ReportEntry) {
-    let (kind, help) = classify_redundancy(&entry.expr);
+    let field_name = &candidate.key.field_name;
+    let (kind, help) = classify_redundancy(&entry.expr, field_name);
 
     span_lint_and_help(
         cx,
@@ -514,15 +515,18 @@ fn emit_lint<'tcx>(cx: &LateContext<'tcx>, candidate: &Candidate, entry: &Report
         candidate.span,
         format!(
             "field `{}` is always initialized to {} across {} construction sites",
-            candidate.key.field_name, kind, entry.construction_site_count,
+            field_name, kind, entry.construction_site_count,
         ),
         None,
         help,
     );
 }
 
-fn classify_redundancy(expr: &NormalizedExpr) -> (&'static str, &'static str) {
-    if contains_sibling_ref(expr) {
+fn classify_redundancy<'a>(
+    expr: &NormalizedExpr,
+    self_field: &str,
+) -> (&'a str, &'a str) {
+    if references_other_sibling(expr, self_field) {
         (
             "an expression derived from other fields",
             "consider making this a method instead of a stored field",
@@ -535,15 +539,23 @@ fn classify_redundancy(expr: &NormalizedExpr) -> (&'static str, &'static str) {
     }
 }
 
-fn contains_sibling_ref(expr: &NormalizedExpr) -> bool {
+/// Returns `true` if the expression references at least one sibling field
+/// *other than* `self_field`. A bare `SiblingField("x")` for field `x` is
+/// just field shorthand, not a derivation.
+fn references_other_sibling(expr: &NormalizedExpr, self_field: &str) -> bool {
     match expr {
-        NormalizedExpr::SiblingField(_) => true,
-        NormalizedExpr::BinOp(_, l, r) => contains_sibling_ref(l) || contains_sibling_ref(r),
-        NormalizedExpr::UnaryOp(_, inner) => contains_sibling_ref(inner),
-        NormalizedExpr::MethodCall(_, args) | NormalizedExpr::FnCall(_, args) | NormalizedExpr::Tuple(args) => {
-            args.iter().any(contains_sibling_ref)
+        NormalizedExpr::SiblingField(name) => name != self_field,
+        NormalizedExpr::BinOp(_, l, r) => {
+            references_other_sibling(l, self_field)
+                || references_other_sibling(r, self_field)
         }
-        NormalizedExpr::FieldAccess(base, _) => contains_sibling_ref(base),
+        NormalizedExpr::UnaryOp(_, inner) => references_other_sibling(inner, self_field),
+        NormalizedExpr::MethodCall(_, args)
+        | NormalizedExpr::FnCall(_, args)
+        | NormalizedExpr::Tuple(args) => {
+            args.iter().any(|a| references_other_sibling(a, self_field))
+        }
+        NormalizedExpr::FieldAccess(base, _) => references_other_sibling(base, self_field),
         _ => false,
     }
 }

@@ -1,0 +1,63 @@
+warning: module contains only a single `pub use` re-export
+  --> $DIR/main.rs:3:1
+   |
+LL | / mod reexport_only {
+LL | |     pub use std::collections::HashMap;
+LL | | }
+   | |_^
+   |
+   = help: consider replacing this module with the `pub use` at the parent scope
+   = note: `#[warn(trivial_forwarding)]` on by default
+
+warning: function `forwarding_add` body is a trivial forwarding call
+  --> $DIR/main.rs:52:1
+   |
+LL | / fn forwarding_add(x: i32, y: i32) -> i32 {
+LL | |     target_add(x, y)
+LL | | }
+   | |_^
+   |
+   = help: consider removing this wrapper and calling the target directly, or using a re-export
+
+warning: function `forwarding_greet` body is a trivial forwarding call
+  --> $DIR/main.rs:57:1
+   |
+LL | / fn forwarding_greet(name: &str) -> String {
+LL | |     target_greet(name)
+LL | | }
+   | |_^
+   |
+   = help: consider removing this wrapper and calling the target directly, or using a re-export
+
+warning: function `forwarding_noop` body is a trivial forwarding call
+  --> $DIR/main.rs:62:1
+   |
+LL | / fn forwarding_noop() {
+LL | |     target_noop()
+LL | | }
+   | |_^
+   |
+   = help: consider removing this wrapper and calling the target directly, or using a re-export
+
+warning: method `get` body is a trivial forwarding call
+  --> $DIR/main.rs:108:5
+   |
+LL | /     fn get(&self) -> i32 {
+LL | |         self.inner.get()
+LL | |     }
+   | |_____^
+   |
+   = help: consider removing this wrapper and calling the target directly, or using a re-export
+
+warning: method `add` body is a trivial forwarding call
+  --> $DIR/main.rs:113:5
+   |
+LL | /     fn add(&self, x: i32) -> i32 {
+LL | |         self.inner.add(x)
+LL | |     }
+   | |_____^
+   |
+   = help: consider removing this wrapper and calling the target directly, or using a re-export
+
+warning: 6 warnings emitted
+

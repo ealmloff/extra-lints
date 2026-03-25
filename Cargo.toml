@@ -23,6 +23,8 @@ exclude = [
     "trait_option_single_variant",
     "unused_public_items_in_workspace",
     "derived_field_should_be_method",
+    "overlapping_struct_fields",
+    "trivial_forwarding",
 ]
 
 [workspace.metadata.dylint]
@@ -35,4 +37,6 @@ libraries = [
     { path = "trait_option_single_variant" },
     { path = "unused_public_items_in_workspace" },
     { path = "derived_field_should_be_method" },
+    { path = "overlapping_struct_fields" },
+    { path = "trivial_forwarding" },
 ]

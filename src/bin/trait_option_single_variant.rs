@@ -139,14 +139,6 @@ fn run() -> Result<()> {
     }
     fs::create_dir_all(&artifact_dir)
         .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
-    if collect_target_dir.exists() {
-        fs::remove_dir_all(&collect_target_dir)
-            .with_context(|| format!("failed to clear {}", collect_target_dir.display()))?;
-    }
-    if emit_target_dir.exists() {
-        fs::remove_dir_all(&emit_target_dir)
-            .with_context(|| format!("failed to clear {}", emit_target_dir.display()))?;
-    }
 
     run_dylint(
         &workspace_root,
@@ -274,13 +266,22 @@ fn build_lint_library(lint_crate_path: &Path) -> Result<PathBuf> {
         dylib_extension(),
     ));
 
-    fs::copy(&built_library_path, &dylint_library_path).with_context(|| {
-        format!(
-            "failed to copy {} to {}",
-            built_library_path.display(),
-            dylint_library_path.display()
-        )
-    })?;
+    let needs_copy = match (
+        fs::metadata(&built_library_path),
+        fs::metadata(&dylint_library_path),
+    ) {
+        (Ok(src), Ok(dst)) => src.modified().ok() > dst.modified().ok(),
+        _ => true,
+    };
+    if needs_copy {
+        fs::copy(&built_library_path, &dylint_library_path).with_context(|| {
+            format!(
+                "failed to copy {} to {}",
+                built_library_path.display(),
+                dylint_library_path.display()
+            )
+        })?;
+    }
 
     Ok(dylint_library_path)
 }
