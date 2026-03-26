@@ -9,7 +9,10 @@ use std::{cell::RefCell, collections::BTreeSet};
 use agent_lint_utils::workspace_lint::{CrateInfo, LintEnvConfig, Mode, write_artifact_file};
 use agent_lint_utils::{DefKey, def_key, normalized_def_path, span_location};
 use clippy_utils::diagnostics::span_lint_and_help;
-use rustc_hir::{Expr, ExprKind, ImplItem, ImplItemKind, Item, ItemKind, Node, QPath, TyKind};
+use rustc_hir::{
+    Expr, ExprKind, FnDecl, FnRetTy, GenericArg, GenericBound, ImplItem, ImplItemKind, Item,
+    ItemKind, MutTy, Node, Path, PolyTraitRef, QPath, TraitRef, Ty, TyKind,
+};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_span::Span;
 use serde::{Deserialize, Serialize};
@@ -63,6 +66,7 @@ struct CandidateRecord {
     file: String,
     line: u32,
     column: u32,
+    required_defs: Vec<DefKey>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +107,7 @@ struct Candidate {
     kind: &'static str,
     display_path: String,
     span: Span,
+    required_defs: BTreeSet<DefKey>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,11 +201,23 @@ impl<'tcx> LateLintPass<'tcx> for UnusedPublicItemsInWorkspace {
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
-        if !matches!(expr.kind, ExprKind::MethodCall(..) | ExprKind::Field(..)) {
-            return;
-        }
+        let maybe_def_id = match expr.kind {
+            ExprKind::MethodCall(..) | ExprKind::Field(..) => {
+                cx.typeck_results().type_dependent_def_id(expr.hir_id)
+            }
+            ExprKind::Call(callee, ..) => match callee.kind {
+                ExprKind::Path(QPath::TypeRelative(..)) => {
+                    cx.typeck_results().type_dependent_def_id(callee.hir_id)
+                }
+                _ => None,
+            },
+            ExprKind::Path(QPath::TypeRelative(..)) => {
+                cx.typeck_results().type_dependent_def_id(expr.hir_id)
+            }
+            _ => None,
+        };
 
-        let Some(def_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id) else {
+        let Some(def_id) = maybe_def_id else {
             return;
         };
 
@@ -271,6 +288,7 @@ fn maybe_record_item_candidate<'tcx>(
             kind,
             display_path: normalized_def_path(cx, item.owner_id.to_def_id()),
             span: item.span,
+            required_defs: required_defs_for_item(cx, item),
         });
     }
 }
@@ -312,11 +330,16 @@ fn maybe_record_impl_item_candidate<'tcx>(
     };
 
     if let Some(kind) = kind {
+        let mut required_defs = BTreeSet::new();
+        required_defs.insert(def_key(cx, self_def_id));
+        required_defs.extend(required_defs_for_impl_item(cx, impl_item));
+
         state.candidates.push(Candidate {
             def_key: def_key(cx, impl_item.owner_id.to_def_id()),
             kind,
             display_path: normalized_def_path(cx, impl_item.owner_id.to_def_id()),
             span: impl_item.span,
+            required_defs,
         });
     }
 }
@@ -349,6 +372,7 @@ fn write_artifact<'tcx>(
                 file,
                 line,
                 column,
+                required_defs: candidate.required_defs.iter().cloned().collect(),
             })
         })
         .collect::<Vec<_>>();
@@ -375,4 +399,193 @@ fn write_artifact<'tcx>(
         &state.info.target_name,
         artifact_dir,
     )
+}
+
+fn required_defs_for_item<'tcx>(cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) -> BTreeSet<DefKey> {
+    let mut required_defs = BTreeSet::new();
+
+    match item.kind {
+        ItemKind::Fn { sig, .. } => collect_fn_sig_required_defs(cx, sig.decl, &mut required_defs),
+        ItemKind::Const(_, _, ty, ..) => {
+            collect_ty_required_defs(cx, ty, &mut required_defs);
+        }
+        ItemKind::Static(_, _, ty, ..) | ItemKind::TyAlias(_, _, ty) => {
+            collect_ty_required_defs(cx, ty, &mut required_defs);
+        }
+        _ => {}
+    }
+
+    required_defs
+}
+
+fn required_defs_for_impl_item<'tcx>(
+    cx: &LateContext<'tcx>,
+    impl_item: &'tcx ImplItem<'tcx>,
+) -> BTreeSet<DefKey> {
+    let mut required_defs = BTreeSet::new();
+
+    match impl_item.kind {
+        ImplItemKind::Fn(sig, ..) => collect_fn_sig_required_defs(cx, sig.decl, &mut required_defs),
+        ImplItemKind::Const(ty, ..) | ImplItemKind::Type(ty) => {
+            collect_ty_required_defs(cx, ty, &mut required_defs);
+        }
+    }
+
+    required_defs
+}
+
+fn collect_fn_sig_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    decl: &'tcx FnDecl<'tcx>,
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    for input in decl.inputs {
+        collect_ty_required_defs(cx, input, required_defs);
+    }
+
+    if let FnRetTy::Return(output) = decl.output {
+        collect_ty_required_defs(cx, output, required_defs);
+    }
+}
+
+fn collect_ty_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    ty: &'tcx Ty<'tcx>,
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    match ty.kind {
+        TyKind::Slice(inner) | TyKind::Array(inner, _) => {
+            collect_ty_required_defs(cx, inner, required_defs);
+        }
+        TyKind::Ptr(MutTy { ty: inner, .. }) | TyKind::Ref(_, MutTy { ty: inner, .. }) => {
+            collect_ty_required_defs(cx, inner, required_defs);
+        }
+        TyKind::Tup(tys) => {
+            for ty in tys {
+                collect_ty_required_defs(cx, ty, required_defs);
+            }
+        }
+        TyKind::Path(qpath) => collect_qpath_required_defs(cx, qpath, required_defs),
+        TyKind::TraitObject(bounds, ..) => {
+            for bound in bounds {
+                collect_poly_trait_ref_required_defs(cx, bound, required_defs);
+            }
+        }
+        TyKind::FnPtr(fn_ptr) => collect_fn_sig_required_defs(cx, fn_ptr.decl, required_defs),
+        TyKind::OpaqueDef(opaque) => {
+            for bound in opaque.bounds {
+                collect_bound_required_defs(cx, bound, required_defs);
+            }
+        }
+        TyKind::TraitAscription(bounds) => {
+            for bound in bounds {
+                collect_bound_required_defs(cx, bound, required_defs);
+            }
+        }
+        TyKind::UnsafeBinder(unsafe_binder) => {
+            collect_ty_required_defs(cx, unsafe_binder.inner_ty, required_defs);
+        }
+        TyKind::Never
+        | TyKind::Infer(_)
+        | TyKind::InferDelegation(_, _)
+        | TyKind::Err(_)
+        | TyKind::Typeof(_)
+        | TyKind::Pat(_, _)
+        => {}
+    }
+}
+
+fn collect_bound_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    bound: &'tcx GenericBound<'tcx>,
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    if let GenericBound::Trait(poly_trait_ref) = bound {
+        collect_poly_trait_ref_required_defs(cx, poly_trait_ref, required_defs);
+    }
+}
+
+fn collect_poly_trait_ref_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    poly_trait_ref: &'tcx PolyTraitRef<'tcx>,
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    collect_trait_ref_required_defs(cx, poly_trait_ref.trait_ref, required_defs);
+}
+
+fn collect_trait_ref_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    trait_ref: TraitRef<'tcx>,
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    collect_path_required_defs(cx, trait_ref.path, required_defs);
+}
+
+fn collect_qpath_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    qpath: QPath<'tcx>,
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    match qpath {
+        QPath::Resolved(_, path) => collect_path_required_defs(cx, path, required_defs),
+        QPath::TypeRelative(ty, segment) => {
+            collect_ty_required_defs(cx, ty, required_defs);
+            if let Some(args) = segment.args {
+                collect_generic_args_required_defs(cx, args.args, required_defs);
+            }
+        }
+        QPath::LangItem(..) => {}
+    }
+}
+
+fn collect_path_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    path: &Path<'tcx>,
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    if let Some(def_id) = path.res.opt_def_id()
+        && local_public_signature_def(cx, def_id)
+    {
+        required_defs.insert(def_key(cx, def_id));
+    }
+
+    for segment in path.segments {
+        if let Some(args) = segment.args {
+            collect_generic_args_required_defs(cx, args.args, required_defs);
+        }
+    }
+}
+
+fn local_public_signature_def<'tcx>(
+    cx: &LateContext<'tcx>,
+    def_id: rustc_span::def_id::DefId,
+) -> bool {
+    if !def_id.is_local() {
+        return false;
+    }
+
+    let visibility_supported = matches!(
+        cx.tcx.def_kind(def_id),
+        rustc_hir::def::DefKind::Struct
+            | rustc_hir::def::DefKind::Union
+            | rustc_hir::def::DefKind::Enum
+            | rustc_hir::def::DefKind::Trait
+            | rustc_hir::def::DefKind::TraitAlias
+            | rustc_hir::def::DefKind::TyAlias
+            | rustc_hir::def::DefKind::AssocTy
+    );
+
+    visibility_supported && cx.tcx.visibility(def_id).is_public()
+}
+
+fn collect_generic_args_required_defs<'tcx>(
+    cx: &LateContext<'tcx>,
+    args: &'tcx [GenericArg<'tcx>],
+    required_defs: &mut BTreeSet<DefKey>,
+) {
+    for arg in args {
+        if let GenericArg::Type(ty) = arg {
+            collect_ty_required_defs(cx, ty.as_unambig_ty(), required_defs);
+        }
+    }
 }

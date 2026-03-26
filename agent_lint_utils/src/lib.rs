@@ -1,11 +1,13 @@
 #![feature(rustc_private)]
 #![warn(unused_extern_crates)]
 
+extern crate rustc_hir;
 extern crate rustc_lint;
 extern crate rustc_span;
 
 pub mod workspace_lint;
 
+use rustc_hir::def::DefKind;
 use rustc_lint::LateContext;
 use rustc_span::{FileName, Span};
 use serde::{Deserialize, Serialize};
@@ -24,10 +26,39 @@ pub fn stable_crate_id<'tcx>(
     format!("{:?}", cx.tcx.stable_crate_id(crate_num))
 }
 
-/// Builds a `DefKey` from a `DefId` using the normalized def path.
+/// Builds a `DefKey` from a `DefId` using the item's structural definition
+/// path rather than rustc's user-facing path string.
+///
+/// This keeps the key stable across `lib`/`lib test` compilations and avoids
+/// re-export spellings like `crate::foo` comparing differently from the
+/// original definition path like `crate::module::foo`.
 pub fn def_key<'tcx>(cx: &LateContext<'tcx>, def_id: rustc_span::def_id::DefId) -> DefKey {
+    let def_id = canonical_def_id(cx, def_id);
     DefKey {
-        path: normalized_def_path(cx, def_id),
+        path: structural_def_path(cx, def_id),
+    }
+}
+
+fn canonical_def_id<'tcx>(
+    cx: &LateContext<'tcx>,
+    def_id: rustc_span::def_id::DefId,
+) -> rustc_span::def_id::DefId {
+    match cx.tcx.def_kind(def_id) {
+        DefKind::Ctor(..) => cx.tcx.opt_parent(def_id).unwrap_or(def_id),
+        _ => def_id,
+    }
+}
+
+fn structural_def_path<'tcx>(
+    cx: &LateContext<'tcx>,
+    def_id: rustc_span::def_id::DefId,
+) -> String {
+    let crate_name = cx.tcx.crate_name(def_id.krate).to_string();
+    let path = cx.tcx.def_path(def_id).to_string_no_crate_verbose();
+    if path.is_empty() {
+        crate_name
+    } else {
+        format!("{crate_name}::{path}")
     }
 }
 
