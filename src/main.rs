@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env,
     ffi::OsString,
     fs,
@@ -72,9 +73,10 @@ fn run() -> Result<()> {
     let _bin = args.next();
 
     let command = args.next().unwrap_or_else(|| OsString::from("check"));
-    if command != "check" {
+    let is_fix = command == "fix";
+    if command != "check" && !is_fix {
         bail!(
-            "unsupported command `{}`; expected `check`",
+            "unsupported command `{}`; expected `check` or `fix`",
             command.to_string_lossy()
         );
     }
@@ -133,18 +135,22 @@ fn run() -> Result<()> {
 
     let report = aggregate_artifacts(&artifact_dir)?;
     let report_json = serde_json::to_vec_pretty(&report)?;
-    fs::write(&report_path, report_json)
+    fs::write(&report_path, &report_json)
         .with_context(|| format!("failed to write {}", report_path.display()))?;
 
-    run_dylint(
-        &workspace_root,
-        &workspace_manifest_path,
-        &lint_library_path,
-        &artifact_dir,
-        &emit_target_dir,
-        Some(&report_path),
-        "emit",
-    )?;
+    if is_fix {
+        apply_fixes(&workspace_root, &report)?;
+    } else {
+        run_dylint(
+            &workspace_root,
+            &workspace_manifest_path,
+            &lint_library_path,
+            &artifact_dir,
+            &emit_target_dir,
+            Some(&report_path),
+            "emit",
+        )?;
+    }
 
     Ok(())
 }
@@ -187,6 +193,7 @@ fn run_dylint(
         .arg(lint_library_path)
         .arg("--manifest-path")
         .arg(manifest_path)
+        .arg("--all-features")
         .arg("--workspace")
         .arg("--")
         .arg("--all-targets")
@@ -312,6 +319,63 @@ fn dylint_toolchain_name() -> &'static str {
     {
         "nightly-2025-09-18-x86_64-pc-windows-msvc"
     }
+}
+
+fn apply_fixes(workspace_root: &Path, report: &AggregatedReport) -> Result<()> {
+    // Group fixes by file, so we can apply multiple fixes to the same file at once.
+    let mut fixes_by_file: BTreeMap<PathBuf, Vec<&UnusedDef>> = BTreeMap::new();
+    for def in &report.unused {
+        let file_path = workspace_root.join(&def.file);
+        fixes_by_file.entry(file_path).or_default().push(def);
+    }
+
+    let mut total_fixed = 0;
+
+    for (file_path, mut fixes) in fixes_by_file {
+        let source = fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read {}", file_path.display()))?;
+        let mut lines: Vec<String> = source.lines().map(String::from).collect();
+
+        // Sort fixes in reverse line order so earlier edits don't shift later ones.
+        fixes.sort_by(|a, b| b.line.cmp(&a.line).then(b.column.cmp(&a.column)));
+
+        for def in &fixes {
+            let line_idx = (def.line as usize).checked_sub(1);
+            let col_idx = (def.column as usize).checked_sub(1);
+            let (Some(line_idx), Some(col_idx)) = (line_idx, col_idx) else {
+                continue;
+            };
+            let Some(line) = lines.get_mut(line_idx) else {
+                continue;
+            };
+
+            // The span starts at the item, which should begin with `pub`.
+            if line[col_idx..].starts_with("pub ") {
+                line.replace_range(col_idx..col_idx + 3, "pub(crate)");
+                total_fixed += 1;
+                eprintln!("  fixed: {} ({}:{})", def.display_path, def.file, def.line);
+            } else if line[col_idx..].starts_with("pub(") {
+                // Already has a visibility modifier, skip.
+            } else {
+                eprintln!(
+                    "  skipped: {} ({}:{}) - unexpected token at pub position",
+                    def.display_path, def.file, def.line
+                );
+            }
+        }
+
+        // Preserve trailing newline if the original had one.
+        let mut output = lines.join("\n");
+        if source.ends_with('\n') {
+            output.push('\n');
+        }
+
+        fs::write(&file_path, output)
+            .with_context(|| format!("failed to write {}", file_path.display()))?;
+    }
+
+    eprintln!("fixed {total_fixed} items");
+    Ok(())
 }
 
 fn aggregate_artifacts(artifact_dir: &Path) -> Result<AggregatedReport> {
