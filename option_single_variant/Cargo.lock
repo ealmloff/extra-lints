@@ -167,6 +167,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "option_single_variant"
+version = "0.1.0"
+dependencies = [
+ "agent_lint_utils",
+ "clippy_utils",
+ "dylint_linting",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -372,17 +383,6 @@ name = "toml_writer"
 version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d282ade6016312faf3e41e57ebbba0c073e4056dab1232ab1cb624199648f8ed"
-
-[[package]]
-name = "trait_option_single_variant"
-version = "0.1.0"
-dependencies = [
- "agent_lint_utils",
- "clippy_utils",
- "dylint_linting",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "unicode-ident"

@@ -9,7 +9,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 /// Configuration for a workspace lint's environment variable names.
 pub struct LintEnvConfig {
-    /// Environment variable prefix, e.g. `"TRAIT_OPTION_SINGLE_VARIANT"`.
+    /// Environment variable prefix, e.g. `"OPTION_SINGLE_VARIANT"`.
     ///
     /// Used to derive `{prefix}_MODE`, `{prefix}_DIR`, and `{prefix}_REPORT`.
     pub prefix: &'static str,

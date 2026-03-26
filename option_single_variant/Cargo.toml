@@ -1,8 +1,8 @@
 [package]
-name = "trait_option_single_variant"
+name = "option_single_variant"
 version = "0.1.0"
 authors = ["authors go here"]
-description = "workspace-wide trait Option single-variant lint"
+description = "workspace-wide Option single-variant lint"
 edition = "2024"
 publish = false
 

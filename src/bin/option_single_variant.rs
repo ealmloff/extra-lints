@@ -17,8 +17,9 @@ struct DefKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum CandidateKey {
-    TraitMethodParam { trait_item: DefKey, index: usize },
+    FunctionParam { function: DefKey, index: usize },
     TraitConst { trait_item: DefKey },
+    StructField { struct_item: DefKey, index: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -126,11 +127,11 @@ fn run() -> Result<()> {
     let workspace_root = PathBuf::from(&metadata.workspace_root);
     let workspace_manifest_path = workspace_root.join("Cargo.toml");
     let target_dir = PathBuf::from(&metadata.target_directory);
-    let artifact_dir = target_dir.join("trait_option_single_variant");
-    let collect_target_dir = target_dir.join("trait_option_single_variant_collect");
-    let emit_target_dir = target_dir.join("trait_option_single_variant_emit");
+    let artifact_dir = target_dir.join("option_single_variant");
+    let collect_target_dir = target_dir.join("option_single_variant_collect");
+    let emit_target_dir = target_dir.join("option_single_variant_emit");
     let report_path = artifact_dir.join("report.json");
-    let lint_crate_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("trait_option_single_variant");
+    let lint_crate_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("option_single_variant");
     let lint_library_path = build_lint_library(&lint_crate_path)?;
 
     if artifact_dir.exists() {
@@ -211,11 +212,11 @@ fn run_dylint(
         .arg("--all-targets")
         .env("CARGO_TARGET_DIR", cargo_target_dir)
         .env("RUSTC_WRAPPER", "")
-        .env("TRAIT_OPTION_SINGLE_VARIANT_MODE", mode)
-        .env("TRAIT_OPTION_SINGLE_VARIANT_DIR", artifact_dir);
+        .env("OPTION_SINGLE_VARIANT_MODE", mode)
+        .env("OPTION_SINGLE_VARIANT_DIR", artifact_dir);
 
     if let Some(report_path) = report_path {
-        command.env("TRAIT_OPTION_SINGLE_VARIANT_REPORT", report_path);
+        command.env("OPTION_SINGLE_VARIANT_REPORT", report_path);
     }
 
     let status = command.status().context("failed to launch cargo dylint")?;
@@ -247,7 +248,7 @@ fn build_lint_library(lint_crate_path: &Path) -> Result<PathBuf> {
     }
 
     let built_library_path = lint_crate_path.join("target").join("release").join(format!(
-        "{}trait_option_single_variant.{}",
+        "{}option_single_variant.{}",
         dylib_prefix(),
         dylib_extension(),
     ));
@@ -260,7 +261,7 @@ fn build_lint_library(lint_crate_path: &Path) -> Result<PathBuf> {
     }
 
     let dylint_library_path = lint_crate_path.join("target").join("release").join(format!(
-        "{}trait_option_single_variant@{}.{}",
+        "{}option_single_variant@{}.{}",
         dylib_prefix(),
         dylint_toolchain_name(),
         dylib_extension(),
