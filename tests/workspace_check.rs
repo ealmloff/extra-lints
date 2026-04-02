@@ -172,6 +172,61 @@ fn main() {
 }
 
 #[test]
+fn excludes_traits_from_workspace_reports() {
+    let workspace = TempDir::new().expect("temp workspace");
+
+    fs::write(
+        workspace.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crate_a"]
+resolver = "2"
+"#,
+    )
+    .expect("workspace manifest");
+
+    fs::create_dir_all(workspace.path().join("crate_a/src")).expect("crate_a src dir");
+    fs::write(
+        workspace.path().join("crate_a/Cargo.toml"),
+        r#"[package]
+name = "crate_a"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+"#,
+    )
+    .expect("crate_a manifest");
+    fs::write(
+        workspace.path().join("crate_a/src/lib.rs"),
+        r#"pub trait Api {
+    fn run(&self);
+}
+
+pub fn unused() {}
+"#,
+    )
+    .expect("crate_a source");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_pubprune"))
+        .arg("check")
+        .current_dir(workspace.path())
+        .status()
+        .expect("run coordinator");
+    assert!(status.success());
+
+    let report = fs::read_to_string(
+        workspace
+            .path()
+            .join("target/unused_public_items/report.json"),
+    )
+    .expect("read report");
+
+    assert!(!report.contains("crate_a::Api"));
+    assert!(report.contains("crate_a::unused"));
+}
+
+#[test]
 fn treats_reexports_as_uses_of_the_original_public_item() {
     let workspace = TempDir::new().expect("temp workspace");
 

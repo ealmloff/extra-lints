@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo dylint:*)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint log --oneline -10)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint show 1fa9515 --stat)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint log --all --oneline --decorate)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint show 1fa9515:no_underscore_prefix_without_drop/src/lib.rs)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint diff ff32ed1..1fa9515 -- no_underscore_prefix_without_drop/src/lib.rs)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint show ff32ed1 --name-only)",
+      "Bash(mkdir:*)",
+      "Bash(cargo +nightly-2025-09-18 build:*)",
+      "Bash(cargo +nightly-2025-09-18 doc:*)",
+      "Bash(tree:*)",
+      "Bash(rustup +nightly-2025-09-18 run bash -c 'find $\\(rustc --print sysroot\\)/lib -name \"\"*.rlib\"\" 2>/dev/null | head -5')",
+      "Bash(rustup +nightly-2025-09-18 run rustc:*)",
+      "Bash(cargo +nightly-2025-09-18 test:*)",
+      "Bash(DYLINT_RUSTFLAGS='--edition 2024' cargo +nightly-2025-09-18 test:*)",
+      "Bash(cargo clean:*)",
+      "Bash(cargo install:*)",
+      "Bash(derived_field_should_be_method check:*)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint log --oneline -20)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint diff HEAD --name-only)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint status --short)",
+      "Bash(git -C /Users/evanalmloff/Desktop/agent-lint diff Cargo.toml)",
+      "Bash(DYLINT_RUSTFLAGS='--edition 2024' cargo test:*)",
+      "Bash(for dir in /Users/evanalmloff/Desktop/agent-lint/*/)",
+      "Bash(do if [ -f \"$dir/.cargo/config.toml\" ])",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(rm:*)",
+      "Bash(./target/debug/derived_field_should_be_method:*)"
+    ]
+  }
+}

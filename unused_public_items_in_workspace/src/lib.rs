@@ -278,7 +278,6 @@ fn maybe_record_item_candidate<'tcx>(
         ItemKind::Struct(..) => Some("struct"),
         ItemKind::Enum(..) => Some("enum"),
         ItemKind::Union(..) => Some("union"),
-        ItemKind::Trait(..) => Some("trait"),
         _ => None,
     };
 
